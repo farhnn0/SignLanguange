@@ -158,6 +158,11 @@ export default function Home() {
   const kataBufferRef = useRef<number[][]>([]);
   const activeModeRef = useRef("huruf");
 
+  // Smoothing untuk mode kata: simpan beberapa prediksi terakhir
+  const kataPredictionHistoryRef = useRef<{ label: string; confidence: number }[]>([]);
+  const KATA_SMOOTHING_WINDOW = 5;
+  const KATA_CONFIDENCE_THRESHOLD = 0.75;
+
   const [activeMode, setActiveMode] = useState("huruf");
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState("");
@@ -179,6 +184,7 @@ export default function Home() {
     activeModeRef.current = activeMode;
 
     kataBufferRef.current = [];
+    kataPredictionHistoryRef.current = [];
     lastApiCallRef.current = 0;
 
     setPredictionValue("-");
@@ -231,7 +237,7 @@ export default function Home() {
     const poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
       baseOptions: {
         modelAssetPath:
-          "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
+          "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task",
         delegate: "GPU",
       },
       runningMode: "VIDEO",
@@ -319,12 +325,15 @@ export default function Home() {
     handednessList.forEach((handedness, index) => {
       const label = handedness[0]?.categoryName;
 
-      // Tetap mengikuti mapping kode kamu sebelumnya karena video di-mirror.
-      if (label === "Left") hands.right = landmarksList[index];
-      if (label === "Right") hands.left = landmarksList[index];
+      // Video di-mirror (scale-x[-1]), jadi Left dari MediaPipe = tangan kanan user
+      // Training Python pakai: left_hand dulu, right_hand kedua (tanpa mirror)
+      // Untuk match training: "Left" dari MediaPipe (= tangan kanan user, tampak kiri di mirror) → map ke left
+      // "Right" dari MediaPipe (= tangan kiri user, tampak kanan di mirror) → map ke right
+      if (label === "Left") hands.left = landmarksList[index];
+      if (label === "Right") hands.right = landmarksList[index];
     });
 
-    // Left hand: 21 x 3 = 63
+    // Left hand: 21 x 3 = 63 (sesuai urutan training Python)
     if (hands.left) {
       for (const lm of hands.left) {
         features.push(lm.x, lm.y, lm.z);
@@ -333,7 +342,7 @@ export default function Home() {
       features.push(...Array(21 * 3).fill(0));
     }
 
-    // Right hand: 21 x 3 = 63
+    // Right hand: 21 x 3 = 63 (sesuai urutan training Python)
     if (hands.right) {
       for (const lm of hands.right) {
         features.push(lm.x, lm.y, lm.z);
@@ -343,6 +352,33 @@ export default function Home() {
     }
 
     return features;
+  };
+
+  // Majority voting dari beberapa prediksi terakhir agar hasil tidak kedap-kedip.
+  // Sama seperti get_stable_prediction di Predict_mix_new.py
+  const getStableKataPrediction = () => {
+    const history = kataPredictionHistoryRef.current;
+    if (history.length === 0) return { label: "-", confidence: 0 };
+
+    const counts: Record<string, number> = {};
+    for (const item of history) {
+      counts[item.label] = (counts[item.label] ?? 0) + 1;
+    }
+
+    let bestLabel = history[0].label;
+    let bestCount = 0;
+    for (const [label, count] of Object.entries(counts)) {
+      if (count > bestCount) {
+        bestCount = count;
+        bestLabel = label;
+      }
+    }
+
+    const matching = history.filter((h) => h.label === bestLabel);
+    const avgConfidence =
+      matching.reduce((sum, h) => sum + h.confidence, 0) / matching.length;
+
+    return { label: bestLabel, confidence: avgConfidence };
   };
 
   const sendFeaturesToAPI = async (
@@ -421,11 +457,40 @@ export default function Home() {
         return;
       }
 
-      setPredictionValue(result.prediction ?? "-");
-      setPredictionLabel(`${mode} terdeteksi`);
-      setConfidence(Math.round((result.confidence ?? 0) * 100));
       setApiStatus("Connected");
       setResponseTime(`${Math.round(endTime - startTime)} ms`);
+
+      const rawConfidence = result.confidence ?? 0;
+      const rawPrediction = result.prediction ?? "-";
+
+      if (mode === "kata") {
+        // Hanya terima prediksi yang cukup yakin, lalu smoothing
+        if (rawConfidence >= KATA_CONFIDENCE_THRESHOLD) {
+          kataPredictionHistoryRef.current.push({
+            label: rawPrediction,
+            confidence: rawConfidence,
+          });
+          if (
+            kataPredictionHistoryRef.current.length > KATA_SMOOTHING_WINDOW
+          ) {
+            kataPredictionHistoryRef.current.shift();
+          }
+
+          const stable = getStableKataPrediction();
+          setPredictionValue(stable.label);
+          setPredictionLabel("kata terdeteksi");
+          setConfidence(Math.round(stable.confidence * 100));
+        } else {
+          // Confidence rendah: tampilkan tapi tandai belum yakin
+          setPredictionValue(rawPrediction);
+          setPredictionLabel("kurang yakin");
+          setConfidence(Math.round(rawConfidence * 100));
+        }
+      } else {
+        setPredictionValue(rawPrediction);
+        setPredictionLabel(`${mode} terdeteksi`);
+        setConfidence(Math.round(rawConfidence * 100));
+      }
     } catch (error) {
       console.error("Fetch API error:", error);
       setApiStatus("Disconnected");
@@ -435,6 +500,7 @@ export default function Home() {
 
   const resetKataBuffer = () => {
     kataBufferRef.current = [];
+    kataPredictionHistoryRef.current = [];
     lastApiCallRef.current = 0;
 
     setFeatureCount(0);
@@ -577,7 +643,11 @@ export default function Home() {
         mode === "kata" ? Array(KATA_NUM_FEATURES).fill(0) : Array(126).fill(0);
 
       if (mode === "kata") {
-        kataBufferRef.current = [];
+        // Jangan reset buffer saat tangan hilang sesaat
+        kataBufferRef.current.push(Array(KATA_NUM_FEATURES).fill(0));
+        if (kataBufferRef.current.length > KATA_MAX_FRAMES) {
+          kataBufferRef.current.shift();
+        }
       }
 
       setHandDetected(false);
@@ -585,12 +655,6 @@ export default function Home() {
       setLandmarkCount(0);
       setLatestFeatures(emptyFeatures);
       setFeatureCount(0);
-
-      if (mode === "kata") {
-        setPredictionValue("-");
-        setPredictionLabel("Tampilkan tangan untuk mode kata");
-        setConfidence(0);
-      }
     }
 
     animationFrameRef.current = requestAnimationFrame(detectHands);

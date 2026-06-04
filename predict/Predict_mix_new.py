@@ -12,25 +12,25 @@ from collections import deque, Counter
 # ============================================================
 
 print("[INFO] Memuat model huruf...")
-with open("huruf_model.pkl", "rb") as f:
+with open("../hasil_train_label/huruf_model.pkl", "rb") as f:
     huruf_model = pickle.load(f)
 
-with open("huruf_labels.pkl", "rb") as f:
+with open("../hasil_train_label/huruf_labels.pkl", "rb") as f:
     huruf_le = pickle.load(f)
 
 
 print("[INFO] Memuat model angka...")
-with open("angka_model.pkl", "rb") as f:
+with open("../hasil_train_label/angka_model.pkl", "rb") as f:
     angka_model = pickle.load(f)
 
-with open("angka_labels.pkl", "rb") as f:
+with open("../hasil_train_label/angka_labels.pkl", "rb") as f:
     angka_le = pickle.load(f)
 
 
 print("[INFO] Memuat model kata baru...")
-kata_model = load_model("bisindo_holistic_gru.h5", compile=False)
+kata_model = load_model("../hasil_train_label/bisindo_holistic_gru.h5", compile=False)
 
-with open("label_encoder.pkl", "rb") as f:
+with open("../hasil_train_label/label_encoder.pkl", "rb") as f:
     kata_le = pickle.load(f)
 
 

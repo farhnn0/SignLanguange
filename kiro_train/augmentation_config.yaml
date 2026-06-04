@@ -1,0 +1,54 @@
+# Augmentation Configuration for BISINDO Kata Model
+# This file defines all augmentation parameters for the training pipeline
+
+# ============================================
+# GLOBAL SETTINGS
+# ============================================
+random_seed: 42
+batch_size: 32
+epochs: 50
+augmentation_multiplier: 3
+augmentation_mode: landmark  # Options: "landmark" or "video_prepass"
+
+# ============================================
+# HORIZONTAL FLIP AUGMENTATION
+# ============================================
+enable_horizontal_flip: true
+flip_probability: 0.5
+
+# ============================================
+# SPEED VARIATION AUGMENTATION
+# ============================================
+enable_speed_variation: true
+speed_factors: [0.8, 0.9, 1.0, 1.1, 1.2]
+speed_probability: 0.7
+
+# ============================================
+# BRIGHTNESS & CONTRAST AUGMENTATION
+# ============================================
+enable_brightness_contrast: true
+brightness_range: [-0.2, 0.2]
+contrast_range: [0.8, 1.2]
+brightness_contrast_probability: 0.5
+
+# ============================================
+# RANDOM CROP & RESIZE AUGMENTATION
+# ============================================
+enable_random_crop_resize: true
+scale_range: [0.85, 1.15]
+crop_probability: 0.5
+
+# ============================================
+# GAUSSIAN NOISE AUGMENTATION
+# ============================================
+enable_gaussian_noise: true
+landmark_noise_std: 0.005  # std for landmark coordinates [0, 1]
+pixel_noise_std: 5.0       # std for pixel values [0, 255]
+noise_probability: 0.5
+
+# ============================================
+# ROTATION AUGMENTATION
+# ============================================
+enable_rotation: true
+rotation_range_degrees: [-10.0, 10.0]
+rotation_probability: 0.5
