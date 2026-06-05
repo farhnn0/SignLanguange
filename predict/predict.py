@@ -10,21 +10,21 @@ from collections import deque               # Antrean memori biar frame muter te
 # 1. LOAD SEMUA MODEL & LABEL
 # ─────────────────────────────────────────
 print("[INFO] Memuat model huruf...")
-with open("huruf_model.pkl", "rb") as f:
+with open("../hasil_train_label/huruf_model.pkl", "rb") as f:
     huruf_model = pickle.load(f)            # Buka otak Random Forest (Huruf)
-with open("huruf_labels.pkl", "rb") as f:
+with open("../hasil_train_label/huruf_labels.pkl", "rb") as f:
     huruf_le = pickle.load(f)               # Buka kamus label Huruf
 
 print("[INFO] Memuat model angka...")
-with open("angka_model.pkl", "rb") as f:
+with open("../hasil_train_label/angka_model.pkl", "rb") as f:
     angka_model = pickle.load(f)            # Buka otak Random Forest (Angka)
-with open("angka_labels.pkl", "rb") as f:
+with open("../hasil_train_label/angka_labels.pkl", "rb") as f:
     angka_le = pickle.load(f)               # Buka kamus label Angka
 
 print("[INFO] Memuat model kata...")
 with tf.device('/CPU:0'):                   # Paksa jalan di CPU biar laptop ga ngos-ngosan
-    kata_model = load_model("kata_model.h5")# Buka otak Deep Learning LSTM (Kata)
-with open("kata_labels.pkl", "rb") as f:
+    kata_model = load_model("../hasil_train_label/kata_model.h5")# Buka otak Deep Learning LSTM (Kata)
+with open("../hasil_train_label/kata_labels.pkl", "rb") as f:
     kata_le = pickle.load(f)                # Buka kamus label Kata
 
 print("[INFO] Semua model berhasil dimuat!")

@@ -456,6 +456,7 @@ export function useSignRecognition() {
     }
 
     kataBufferRef.current = [];
+    kataPredictionHistoryRef.current = [];
 
     setCameraActive(false);
     setHandDetected(false);
