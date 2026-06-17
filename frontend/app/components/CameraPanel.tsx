@@ -42,6 +42,7 @@ export function CameraPanel({
 }: CameraPanelProps) {
   return (
     <Card className="p-0">
+      {/* Header Panel Utama */}
       <div className="flex items-center justify-between gap-4 border-b border-neutral-200 p-5">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">
@@ -59,15 +60,18 @@ export function CameraPanel({
       </div>
 
       <div className="p-5">
+        {/* Tampilan Pesan Error Kamera */}
         {cameraError && (
           <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {cameraError}
           </div>
         )}
 
+        {/* Video & Canvas Overlay Deteksi */}
         <div className="relative aspect-video overflow-hidden rounded-2xl bg-neutral-950">
           {cameraActive ? (
             <>
+              {/* Element Video Webcam */}
               <video
                 ref={videoRef}
                 autoPlay
@@ -76,20 +80,24 @@ export function CameraPanel({
                 className="h-full w-full scale-x-[-1] object-cover"
               />
 
+              {/* Element Canvas untuk Menggambar Kerangka */}
               <canvas
                 ref={canvasRef}
                 className="absolute inset-0 h-full w-full scale-x-[-1]"
               />
 
+              {/* Indikator Status Deteksi Tangan */}
               <div className="absolute left-4 top-4 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-white backdrop-blur">
                 {handDetected ? "Hand detected" : "No hand detected"}
               </div>
 
+              {/* Info Jumlah Tangan & Titik Rangka */}
               <div className="absolute right-4 top-4 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-white backdrop-blur">
                 {handCount} {handCount > 1 ? "hands" : "hand"} • {landmarkCount}{" "}
                 landmarks
               </div>
 
+              {/* Progress Buffer untuk Mode Kata Dinamis */}
               {activeMode === "kata" && (
                 <div className="absolute bottom-4 left-4 right-4">
                   <div className="mb-2 flex items-center justify-between text-xs font-medium text-white">
@@ -115,6 +123,7 @@ export function CameraPanel({
               )}
             </>
           ) : (
+            /* Tampilan saat Kamera Mati */
             <div className="flex h-full flex-col items-center justify-center px-6 text-center text-white">
               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10">
                 <Camera size={30} />
@@ -128,6 +137,7 @@ export function CameraPanel({
           )}
         </div>
 
+        {/* Tombol Aksi Kontrol Kamera & Buffer */}
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
           <button
             onClick={onStart}

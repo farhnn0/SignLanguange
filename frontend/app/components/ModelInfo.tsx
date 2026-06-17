@@ -31,11 +31,13 @@ export function ModelInfo({
   return (
     <section className="mx-auto max-w-7xl px-5 pb-8 lg:px-8">
       <Card>
+        {/* Header Bagian Model Info */}
         <div className="mb-4 flex items-center gap-2">
           <Brain size={18} />
           <h2 className="text-lg font-semibold tracking-tight">Model Info</h2>
         </div>
 
+        {/* Grid Informasi Metrik Konfigurasi Model */}
         <div className="grid gap-4 md:grid-cols-5">
           <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
             <p className="text-sm text-neutral-500">Static Model</p>
@@ -67,6 +69,7 @@ export function ModelInfo({
           </div>
         </div>
 
+        {/* Panel Preview Nilai Koordinat Landmark Terkini */}
         <div className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
           <p className="text-sm text-neutral-500">Feature Preview</p>
           <p className="mt-2 break-all font-mono text-xs text-neutral-600">

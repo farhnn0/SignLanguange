@@ -1,13 +1,5 @@
 /**
- * GestureGuide
- * ============
  * Menampilkan grid 8 video contoh gesture kata BISINDO.
- * Letaknya di bawah baris MetricsRow sebagai referensi cepat
- * agar pengguna tidak perlu membuka file explorer.
- *
- * Video disajikan dengan loop + muted + autoplay agar langsung
- * terlihat gerakannya begitu di-hover. Dalam keadaan biasa
- * video dalam status paused dan baru play saat mouse masuk.
  */
 
 "use client";
@@ -68,10 +60,12 @@ const GESTURES: GestureItem[] = [
 function GestureCard({ item }: { item: GestureItem }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Play video saat pointer masuk
   const handleMouseEnter = () => {
     videoRef.current?.play();
   };
 
+  // Stop video dan kembalikan ke awal saat pointer keluar
   const handleMouseLeave = () => {
     if (videoRef.current) {
       videoRef.current.pause();
@@ -85,7 +79,7 @@ function GestureCard({ item }: { item: GestureItem }) {
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      {/* Video */}
+      {/* Video Container */}
       <div className="relative aspect-[4/3] overflow-hidden bg-neutral-900">
         <video
           ref={videoRef}
@@ -96,18 +90,18 @@ function GestureCard({ item }: { item: GestureItem }) {
           preload="metadata"
           className="h-full w-full object-cover"
         />
-        {/* Label overlay */}
+        {/* Label Overlay Nama Kata */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2">
           <p className="text-sm font-semibold text-white">{item.label}</p>
         </div>
-        {/* Hover hint */}
+        {/* Hint Aksi Hover */}
         <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
           <span className="rounded-full bg-black/40 px-3 py-1 text-xs font-medium text-white backdrop-blur">
             ▶ Hover untuk putar
           </span>
         </div>
       </div>
-      {/* Caption */}
+      {/* Keterangan Hint Gerakan */}
       <div className="px-3 py-2">
         <p className="text-xs text-neutral-500">{item.hint}</p>
       </div>
@@ -118,6 +112,7 @@ function GestureCard({ item }: { item: GestureItem }) {
 export function GestureGuide() {
   return (
     <Card>
+      {/* Header Bagian Contoh Panduan */}
       <div className="mb-4 flex items-center gap-2">
         <BookOpen size={18} />
         <h2 className="text-lg font-semibold tracking-tight">
@@ -128,6 +123,7 @@ export function GestureGuide() {
         </span>
       </div>
 
+      {/* Grid List Video Referensi */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-4">
         {GESTURES.map((item) => (
           <GestureCard key={item.label} item={item} />

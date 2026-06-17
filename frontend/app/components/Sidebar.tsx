@@ -46,6 +46,7 @@ export function Sidebar({
 
   return (
     <aside className="space-y-6">
+      {/* 1. Panel Pemilihan Mode Deteksi */}
       <Card>
         <div className="mb-4">
           <h2 className="text-lg font-semibold tracking-tight">
@@ -85,6 +86,7 @@ export function Sidebar({
         </div>
       </Card>
 
+      {/* 2. Panel Hasil Prediksi Model */}
       <Card>
         <div className="mb-5 flex items-center justify-between gap-4">
           <div>
@@ -109,10 +111,12 @@ export function Sidebar({
         </div>
       </Card>
 
+      {/* 3. Panel Indikator Keakuratan (Confidence) */}
       <Card>
         <ConfidenceBar value={prediction.confidence} />
       </Card>
 
+      {/* 4. Panel Info Status Sistem Terperinci */}
       <Card>
         <div className="mb-4 flex items-center gap-2">
           <Info size={18} />
@@ -175,6 +179,7 @@ export function Sidebar({
         </div>
       </Card>
 
+      {/* 5. Panel Panduan Cara Penggunaan */}
       <Card>
         <div className="mb-4 flex items-center gap-2">
           <AlertCircle size={18} />

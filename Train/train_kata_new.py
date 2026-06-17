@@ -26,11 +26,14 @@ AUG_FACTOR    = 5    # Setiap sample diaugmentasi jadi 5x lipat
 # 2. FUNGSI PADDING / TRIMMING
 # ─────────────────────────────────────────
 def normalize_sequence(sequence, max_frames):
+    # Jika sequence lebih panjang dari max_frames, potong hingga max_frames
     if len(sequence) > max_frames:
         return sequence[:max_frames]
+    # Jika sequence lebih pendek, tambahkan padding baris nol di akhir
     elif len(sequence) < max_frames:
-        pad = np.zeros((max_frames - len(sequence), sequence.shape[1]))
-        return np.vstack([sequence, pad])
+        pad = np.zeros((max_frames - len(sequence), sequence.shape[1]))  # Buat matrix nol berukuran (selisih, jumlah fitur)
+        return np.vstack([sequence, pad])  # Gabung sequence asli + padding di bawahnya
+    # Jika panjangnya pas, langsung return tanpa perubahan
     return sequence
 
 # ─────────────────────────────────────────
@@ -41,54 +44,58 @@ def augment_sequence(sequence):
     Buat variasi dari 1 sequence untuk memperbanyak data training.
     Menghasilkan AUG_FACTOR variasi baru per sample.
     """
-    augmented = []
+    augmented = []  # List kosong untuk simpan hasil augmentasi
 
-    for _ in range(AUG_FACTOR):
-        aug = sequence.copy()
+    for _ in range(AUG_FACTOR):  # Loop AUG_FACTOR kali (misal: 5x)
+        aug = sequence.copy()  # Copy sequence asli (jangan modifikasi original)
 
         # Augmentasi 1: Tambah noise Gaussian kecil ke koordinat
-        noise = np.random.normal(0, 0.005, aug.shape)
-        aug = aug + noise
+        noise = np.random.normal(0, 0.005, aug.shape)  # Buat derau acak dengan std dev 0.005
+        aug = aug + noise  # Tambah derau ke semua koordinat (simulasi kamera goyang)
 
         # Augmentasi 2: Time warping — percepat atau perlambat sedikit
-        warp_factor = np.random.uniform(0.85, 1.15)
-        original_len = len(aug)
-        new_len = int(original_len * warp_factor)
-        if new_len > 1:
-            indices = np.linspace(0, original_len - 1, new_len)
-            aug = np.array([aug[int(i)] for i in indices])
+        warp_factor = np.random.uniform(0.85, 1.15)  # Random multiplier 0.85x - 1.15x
+        original_len = len(aug)  # Simpan jumlah frame asli (misal: 50)
+        new_len = int(original_len * warp_factor)  # Hitung frame baru (misal: 45 atau 55)
+        if new_len > 1:  # Pastikan minimal ada 1 frame
+            indices = np.linspace(0, original_len - 1, new_len)  # Buat index baru yg renggang/rapat
+            aug = np.array([aug[int(i)] for i in indices])  # Interpolasi: ambil frame di index baru
 
         # Augmentasi 3: Scale koordinat sedikit (simulasi jarak tangan ke kamera)
-        scale = np.random.uniform(0.92, 1.08)
-        aug = aug * scale
+        scale = np.random.uniform(0.92, 1.08)  # Random scale 0.92x - 1.08x
+        aug = aug * scale  # Kalikan semua koordinat (tangan lebih besar/kecil)
 
         # Normalize kembali ke MAX_FRAMES
-        aug = normalize_sequence(aug, MAX_FRAMES)
-        augmented.append(aug)
+        aug = normalize_sequence(aug, MAX_FRAMES)  # Pastikan ukuran tetap (padding/trim jika perlu)
+        augmented.append(aug)  # Simpan 1 variasi ke list
 
-    return augmented
+    return augmented  # Return list berisi AUG_FACTOR variasi
 
 # ─────────────────────────────────────────
 # 4. LOAD DATASET
 # ─────────────────────────────────────────
 def load_dataset(base_path):
     X, y, skipped = [], [], 0
-    classes = sorted(os.listdir(base_path))
+    classes = sorted(os.listdir(base_path))  # Ambil nama semua folder
     print(f"\n[INFO] Loading dataset — {len(classes)} kelas: {classes}")
 
-    for label in tqdm(classes, desc="Loading"):
+    for label in tqdm(classes, desc="Loading"): # Loop setiap folder (TQDM = progress bar)
         folder = os.path.join(base_path, label)
         if not os.path.isdir(folder):
             continue
+
         for fname in os.listdir(folder):
-            if not fname.endswith('.npy'):
+            if not fname.endswith('.npy'):  # Filter file .npy saja
                 continue
+
             try:
                 data = np.load(os.path.join(folder, fname), allow_pickle=True)
-                if data.ndim != 2 or data.shape[1] != NUM_FEATURES:
+
+                if data.ndim != 2 or data.shape[1] != NUM_FEATURES:  # Validasi format
                     skipped += 1
                     continue
-                data = normalize_sequence(data, MAX_FRAMES)
+
+                data = normalize_sequence(data, MAX_FRAMES)  # Samakan durasi jadi 50 frame
                 X.append(data)
                 y.append(label)
             except:

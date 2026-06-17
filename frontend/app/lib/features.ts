@@ -1,22 +1,7 @@
-/**
- * Ekstraksi fitur landmark menjadi array angka yang dikirim ke backend.
- *
- * PENTING: urutan & jumlah fitur HARUS identik dengan saat training
- * (Train/train_kata_bisindo_gru.py). Mengubah urutan = model salah prediksi.
- */
-
 import type { HandLandmark, PoseLandmark, Handedness } from "./types";
 
-/**
- * Petakan daftar tangan MediaPipe ke slot { left, right }.
- *
- * Video di-mirror secara visual (scale-x-[-1]), sehingga:
- * - "Left" dari MediaPipe  -> tangan kanan user (tampak di kiri) -> slot left
- * - "Right" dari MediaPipe -> tangan kiri user (tampak di kanan) -> slot right
- *
- * Pemetaan ini sengaja dibuat agar cocok dengan urutan
- * left_hand lalu right_hand pada data training Python.
- */
+// 1. PEMETAAN TANGAN MEDIAPIPE
+// Petakan tangan MediaPipe ke slot left/right agar cocok dengan urutan training Python
 function mapHands(
   landmarksList: HandLandmark[][],
   handednessList: Handedness[][]
@@ -35,12 +20,8 @@ function mapHands(
   return hands;
 }
 
-/**
- * Fitur untuk model HURUF (2 tangan x 21 x 3 = 126).
- *
- * Catatan: untuk huruf memakai pemetaan lama (Left->right, Right->left)
- * mengikuti kode awal agar konsisten dengan model huruf yang sudah ada.
- */
+// 2. EKSTRAKSI FITUR HURUF
+// Ekstrak 126 fitur koordinat (2 tangan x 21 landmark x 3 dimensi) untuk model huruf
 export function extractHurufFeatures(
   landmarksList: HandLandmark[][],
   handednessList: Handedness[][]
@@ -75,10 +56,8 @@ export function extractHurufFeatures(
   return features;
 }
 
-/**
- * Fitur untuk model KATA (holistic): pose(132) + left hand(63) + right hand(63) = 258.
- * Urutan persis sama dengan extract_landmarks() di training Python.
- */
+// 3. EKSTRAKSI FITUR KATA
+// Ekstrak 258 fitur (pose: 132 + left hand: 63 + right hand: 63) untuk model kata
 export function extractKataFeatures(
   poseLandmarks: PoseLandmark[] | undefined,
   landmarksList: HandLandmark[][],
@@ -86,7 +65,6 @@ export function extractKataFeatures(
 ): number[] {
   const features: number[] = [];
 
-  // Pose: 33 x 4 = 132
   if (poseLandmarks && poseLandmarks.length > 0) {
     for (const lm of poseLandmarks) {
       features.push(lm.x, lm.y, lm.z, lm.visibility ?? 0);
@@ -97,14 +75,12 @@ export function extractKataFeatures(
 
   const hands = mapHands(landmarksList, handednessList);
 
-  // Left hand: 21 x 3 = 63
   if (hands.left) {
     for (const lm of hands.left) features.push(lm.x, lm.y, lm.z);
   } else {
     features.push(...Array(21 * 3).fill(0));
   }
 
-  // Right hand: 21 x 3 = 63
   if (hands.right) {
     for (const lm of hands.right) features.push(lm.x, lm.y, lm.z);
   } else {

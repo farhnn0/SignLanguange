@@ -19,6 +19,7 @@ export function MetricsRow({
 }: MetricsRowProps) {
   return (
     <div className="grid gap-6 md:grid-cols-3">
+      {/* Kartu Metrik 1: Latensi Response Time */}
       <Card>
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-100">
@@ -31,6 +32,7 @@ export function MetricsRow({
         </div>
       </Card>
 
+      {/* Kartu Metrik 2: Model yang Sedang Aktif */}
       <Card>
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-100">
@@ -45,6 +47,7 @@ export function MetricsRow({
         </div>
       </Card>
 
+      {/* Kartu Metrik 3: Status Konektivitas Backend */}
       <Card>
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-100">

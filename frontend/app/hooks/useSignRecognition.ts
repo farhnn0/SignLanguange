@@ -1,18 +1,3 @@
-/**
- * useSignRecognition
- * ==================
- * Hook utama yang membungkus seluruh state & logika pengenalan isyarat:
- * - Memuat model MediaPipe (hand + pose)
- * - Mengakses webcam
- * - Loop deteksi per-frame (requestAnimationFrame)
- * - Ekstraksi fitur sesuai mode (huruf/angka/kata)
- * - Mengirim fitur ke backend & smoothing hasil kata
- *
- * Logika di sini sengaja dipertahankan 1:1 dengan versi sebelumnya
- * agar fungsionalitas dan akurasi tidak berubah. Komponen UI cukup
- * memakai nilai & fungsi yang dikembalikan hook ini.
- */
-
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -40,40 +25,41 @@ import { extractHurufFeatures, extractKataFeatures } from "../lib/features";
 import { getStableKataPrediction } from "../lib/prediction";
 
 export function useSignRecognition() {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
 
-  const handLandmarkerRef = useRef<HandLandmarker | null>(null);
-  const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
+  // 1. INISIALISASI STATE & REFS
+  const videoRef = useRef<HTMLVideoElement | null>(null); // Referensi ke elemen video webcam di HTML
+  const canvasRef = useRef<HTMLCanvasElement | null>(null); // Referensi ke elemen canvas untuk menggambar rangka tangan
+  const streamRef = useRef<MediaStream | null>(null); // Menyimpan aliran stream kamera yang sedang aktif
 
-  const animationFrameRef = useRef<number | null>(null);
-  const lastApiCallRef = useRef<number>(0);
+  const handLandmarkerRef = useRef<HandLandmarker | null>(null); // Menyimpan instance model detektor tangan MediaPipe
+  const poseLandmarkerRef = useRef<PoseLandmarker | null>(null); // Menyimpan instance model detektor pose/badan MediaPipe
 
-  const kataBufferRef = useRef<number[][]>([]);
-  const activeModeRef = useRef("huruf");
+  const animationFrameRef = useRef<number | null>(null); // ID animasi frame loop untuk requestAnimationFrame
+  const lastApiCallRef = useRef<number>(0); // Waktu pemanggilan API terakhir untuk throttling (pembatasan request)
 
-  // Riwayat prediksi kata untuk smoothing (majority voting).
-  const kataPredictionHistoryRef = useRef<KataPrediction[]>([]);
+  const kataBufferRef = useRef<number[][]>([]); // Buffer penampung koordinat frame (maksimal 50 frame) untuk mode kata
+  const activeModeRef = useRef("huruf"); // Referensi mode aktif yang dibaca di dalam loop deteksi frame
 
-  const [activeMode, setActiveMode] = useState("huruf");
-  const [cameraActive, setCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState("");
-  const [modelLoading, setModelLoading] = useState(false);
+  const kataPredictionHistoryRef = useRef<KataPrediction[]>([]); // Menyimpan riwayat prediksi kata untuk smoothing (majority voting)
 
-  const [handDetected, setHandDetected] = useState(false);
-  const [handCount, setHandCount] = useState(0);
-  const [landmarkCount, setLandmarkCount] = useState(0);
-  const [featureCount, setFeatureCount] = useState(0);
-  const [latestFeatures, setLatestFeatures] = useState<number[]>([]);
+  const [activeMode, setActiveMode] = useState("huruf"); // State penampung mode deteksi aktif (huruf, angka, atau kata)
+  const [cameraActive, setCameraActive] = useState(false); // State status keaktifan kamera webcam (true/false)
+  const [cameraError, setCameraError] = useState(""); // State penampung pesan error jika gagal akses kamera
+  const [modelLoading, setModelLoading] = useState(false); // State status indikator loading model MediaPipe (.wasm)
 
-  const [predictionValue, setPredictionValue] = useState("-");
-  const [predictionLabel, setPredictionLabel] = useState("Waiting for camera");
-  const [confidence, setConfidence] = useState(0);
-  const [apiStatus, setApiStatus] = useState<ApiStatus>("Disconnected");
-  const [responseTime, setResponseTime] = useState("-");
+  const [handDetected, setHandDetected] = useState(false); // State penanda apakah ada tangan terdeteksi di kamera
+  const [handCount, setHandCount] = useState(0); // State jumlah tangan yang terdeteksi (0, 1, atau 2 tangan)
+  const [landmarkCount, setLandmarkCount] = useState(0); // State total jumlah titik landmark terdeteksi (tangan + tubuh)
+  const [featureCount, setFeatureCount] = useState(0); // State jumlah koordinat numerik yang siap dikirim ke API
+  const [latestFeatures, setLatestFeatures] = useState<number[]>([]); // State array data koordinat terbaru untuk didebug
 
-  // Reset buffer & status saat mode berganti.
+  const [predictionValue, setPredictionValue] = useState("-"); // State hasil huruf/angka/kata akhir (misal: "A", "1", "Makan")
+  const [predictionLabel, setPredictionLabel] = useState("Waiting for camera"); // State teks keterangan deteksi di bawah hasil
+  const [confidence, setConfidence] = useState(0); // State persentase kepercayaan hasil prediksi model (0 - 100%)
+  const [apiStatus, setApiStatus] = useState<ApiStatus>("Disconnected"); // State status koneksi API backend FastAPI
+  const [responseTime, setResponseTime] = useState("-"); // State waktu kecepatan respons dari server FastAPI (ms)
+
+  // 2. RESET BUFFER SAAT MODE BERGANTI
   useEffect(() => {
     activeModeRef.current = activeMode;
 
@@ -90,8 +76,7 @@ export function useSignRecognition() {
     setLatestFeatures([]);
   }, [activeMode]);
 
-  // ---- Loader model (cache via ref) ----
-
+  // 3. LOADER MODEL MEDIAPIPE
   const loadHandLandmarker = async () => {
     if (handLandmarkerRef.current) return handLandmarkerRef.current;
     setModelLoading(true);
@@ -110,8 +95,7 @@ export function useSignRecognition() {
     return poseLandmarker;
   };
 
-  // ---- Kirim fitur ke backend + smoothing ----
-
+  // 4. PENGIRIMAN DATA API & SMOOTHING
   const sendFeaturesToAPI = async (
     features: number[],
     detectedHandCount: number
@@ -182,7 +166,6 @@ export function useSignRecognition() {
       const rawPrediction = result.prediction ?? "-";
 
       if (mode === "kata") {
-        // Hanya terima prediksi yang cukup yakin, lalu smoothing.
         if (rawConfidence >= KATA_CONFIDENCE_THRESHOLD) {
           kataPredictionHistoryRef.current.push({
             label: rawPrediction,
@@ -215,6 +198,7 @@ export function useSignRecognition() {
     }
   };
 
+  // 5. RESET BUFFER KATA
   const resetKataBuffer = () => {
     kataBufferRef.current = [];
     kataPredictionHistoryRef.current = [];
@@ -230,8 +214,7 @@ export function useSignRecognition() {
     console.log("[INFO] Buffer kata direset.");
   };
 
-  // ---- Loop deteksi per-frame ----
-
+  // 6. FRAME LOOP & DETEKSI LANDMARK
   const detectHands = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -349,7 +332,6 @@ export function useSignRecognition() {
           : Array(HURUF_FEATURES).fill(0);
 
       if (mode === "kata") {
-        // Jangan reset buffer saat tangan hilang sesaat; isi frame kosong.
         kataBufferRef.current.push(Array(KATA_NUM_FEATURES).fill(0));
         if (kataBufferRef.current.length > KATA_MAX_FRAMES) {
           kataBufferRef.current.shift();
@@ -366,8 +348,7 @@ export function useSignRecognition() {
     animationFrameRef.current = requestAnimationFrame(detectHands);
   };
 
-  // ---- Kontrol kamera ----
-
+  // 7. KONTROL WEBCAM
   const startCamera = async () => {
     try {
       setCameraError("");
@@ -472,7 +453,7 @@ export function useSignRecognition() {
     setApiStatus("Disconnected");
   };
 
-  // Cleanup saat unmount.
+  // 8. LIFECYCLE CLEANUP & MEMOIZATION
   useEffect(() => {
     return () => {
       if (animationFrameRef.current) {
@@ -496,11 +477,8 @@ export function useSignRecognition() {
   }, [cameraActive, predictionValue, predictionLabel, confidence]);
 
   return {
-    // refs untuk elemen DOM
     videoRef,
     canvasRef,
-
-    // state
     activeMode,
     setActiveMode,
     cameraActive,
@@ -515,8 +493,6 @@ export function useSignRecognition() {
     apiStatus,
     responseTime,
     prediction,
-
-    // actions
     startCamera,
     stopCamera,
     resetKataBuffer,
