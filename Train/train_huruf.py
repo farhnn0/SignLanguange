@@ -80,7 +80,8 @@ def load_dataset(base_path, split_name):
 
 
 # 5. MAIN PIPELINE (TRAINING & EVALUASI)
-X_train, y_train = load_dataset(TRAIN_PATH, "train")
+X_train, y_train = load_dataset(TRAIN_PATH,
+ "train")
 X_val, y_val = load_dataset(VAL_PATH, "val")
 
 print(f"\n[INFO] Shape X_train: {X_train.shape}")  # Target shape: (Jumlah Gambar, 126)

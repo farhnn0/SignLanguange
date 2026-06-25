@@ -1,5 +1,15 @@
 "use client";
 
+/**
+ * useSignRecognition — Hook Utama Pengenalan Isyarat
+ * ===================================================
+ * Ini adalah "otak" dari seluruh aplikasi web.
+ * Semua logika ada di sini: akses kamera, deteksi landmark, kirim data ke backend, tampilkan hasil.
+ *
+ * Alur kerja singkat:
+ * Webcam → MediaPipe (deteksi tangan/pose) → Ekstrak koordinat angka → Kirim ke FastAPI → Tampilkan prediksi
+ */
+
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -26,46 +36,62 @@ import { getStableKataPrediction } from "../lib/prediction";
 
 export function useSignRecognition() {
 
+  // ============================================================
   // 1. INISIALISASI STATE & REFS
-  const videoRef = useRef<HTMLVideoElement | null>(null); // Referensi ke elemen video webcam di HTML
-  const canvasRef = useRef<HTMLCanvasElement | null>(null); // Referensi ke elemen canvas untuk menggambar rangka tangan
-  const streamRef = useRef<MediaStream | null>(null); // Menyimpan aliran stream kamera yang sedang aktif
+  // ============================================================
+  // "ref" = referensi ke sesuatu, isinya tidak memicu render ulang UI
+  // "state" = data yang jika berubah akan memperbarui tampilan UI
 
-  const handLandmarkerRef = useRef<HandLandmarker | null>(null); // Menyimpan instance model detektor tangan MediaPipe
-  const poseLandmarkerRef = useRef<PoseLandmarker | null>(null); // Menyimpan instance model detektor pose/badan MediaPipe
+  const videoRef = useRef<HTMLVideoElement | null>(null);   // Referensi ke elemen <video> di HTML (tampilan kamera)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null); // Referensi ke <canvas> untuk menggambar rangka tangan di atas video
+  const streamRef = useRef<MediaStream | null>(null);       // Menyimpan stream kamera yang sedang aktif agar bisa dihentikan nanti
 
-  const animationFrameRef = useRef<number | null>(null); // ID animasi frame loop untuk requestAnimationFrame
-  const lastApiCallRef = useRef<number>(0); // Waktu pemanggilan API terakhir untuk throttling (pembatasan request)
+  const handLandmarkerRef = useRef<HandLandmarker | null>(null); // Instance model deteksi tangan MediaPipe (di-cache agar tidak reload ulang)
+  const poseLandmarkerRef = useRef<PoseLandmarker | null>(null); // Instance model deteksi pose/badan MediaPipe (hanya dipakai di mode kata)
 
-  const kataBufferRef = useRef<number[][]>([]); // Buffer penampung koordinat frame (maksimal 50 frame) untuk mode kata
-  const activeModeRef = useRef("huruf"); // Referensi mode aktif yang dibaca di dalam loop deteksi frame
+  const animationFrameRef = useRef<number | null>(null); // ID untuk requestAnimationFrame — dipakai agar loop deteksi bisa dihentikan
+  const lastApiCallRef = useRef<number>(0);              // Waktu terakhir kita kirim data ke backend (untuk throttling: batasi max 1 request per 500ms)
 
-  const kataPredictionHistoryRef = useRef<KataPrediction[]>([]); // Menyimpan riwayat prediksi kata untuk smoothing (majority voting)
+  // Buffer untuk mode KATA:
+  // Menampung koordinat dari 50 frame terakhir. Baru dikirim ke backend kalau sudah penuh 50 frame.
+  const kataBufferRef = useRef<number[][]>([]);
+  const activeModeRef = useRef("huruf"); // Ref mode aktif — dipakai di dalam loop deteksi (tidak bisa pakai state langsung di dalam loop)
 
-  const [activeMode, setActiveMode] = useState("huruf"); // State penampung mode deteksi aktif (huruf, angka, atau kata)
-  const [cameraActive, setCameraActive] = useState(false); // State status keaktifan kamera webcam (true/false)
-  const [cameraError, setCameraError] = useState(""); // State penampung pesan error jika gagal akses kamera
-  const [modelLoading, setModelLoading] = useState(false); // State status indikator loading model MediaPipe (.wasm)
+  // Riwayat 5 prediksi kata terakhir untuk smoothing (majority voting)
+  // Tujuan: agar hasil tidak "kedap-kedip" ganti-ganti tiap frame
+  const kataPredictionHistoryRef = useRef<KataPrediction[]>([]);
 
-  const [handDetected, setHandDetected] = useState(false); // State penanda apakah ada tangan terdeteksi di kamera
-  const [handCount, setHandCount] = useState(0); // State jumlah tangan yang terdeteksi (0, 1, atau 2 tangan)
-  const [landmarkCount, setLandmarkCount] = useState(0); // State total jumlah titik landmark terdeteksi (tangan + tubuh)
-  const [featureCount, setFeatureCount] = useState(0); // State jumlah koordinat numerik yang siap dikirim ke API
-  const [latestFeatures, setLatestFeatures] = useState<number[]>([]); // State array data koordinat terbaru untuk didebug
+  // State UI — perubahan ini akan memperbarui tampilan web secara otomatis
+  const [activeMode, setActiveMode] = useState("huruf");               // Mode aktif: "huruf", "angka", atau "kata"
+  const [cameraActive, setCameraActive] = useState(false);             // Apakah kamera sedang menyala?
+  const [cameraError, setCameraError] = useState("");                  // Pesan error jika kamera gagal diakses
+  const [modelLoading, setModelLoading] = useState(false);             // Sedang loading model MediaPipe?
 
-  const [predictionValue, setPredictionValue] = useState("-"); // State hasil huruf/angka/kata akhir (misal: "A", "1", "Makan")
-  const [predictionLabel, setPredictionLabel] = useState("Waiting for camera"); // State teks keterangan deteksi di bawah hasil
-  const [confidence, setConfidence] = useState(0); // State persentase kepercayaan hasil prediksi model (0 - 100%)
-  const [apiStatus, setApiStatus] = useState<ApiStatus>("Disconnected"); // State status koneksi API backend FastAPI
-  const [responseTime, setResponseTime] = useState("-"); // State waktu kecepatan respons dari server FastAPI (ms)
+  const [handDetected, setHandDetected] = useState(false);             // Apakah tangan terdeteksi di kamera?
+  const [handCount, setHandCount] = useState(0);                       // Jumlah tangan yang terdeteksi (0/1/2)
+  const [landmarkCount, setLandmarkCount] = useState(0);               // Total titik koordinat yang terdeteksi
+  const [featureCount, setFeatureCount] = useState(0);                 // Jumlah angka koordinat yang siap dikirim ke API
+  const [latestFeatures, setLatestFeatures] = useState<number[]>([]); // Data koordinat terbaru (untuk debug/ditampilkan)
 
-  // 2. RESET BUFFER SAAT MODE BERGANTI
+  const [predictionValue, setPredictionValue] = useState("-");          // Hasil prediksi: misal "A", "3", atau "Makan"
+  const [predictionLabel, setPredictionLabel] = useState("Waiting for camera"); // Teks status di bawah hasil prediksi
+  const [confidence, setConfidence] = useState(0);                      // Persentase keyakinan model (0-100%)
+  const [apiStatus, setApiStatus] = useState<ApiStatus>("Disconnected"); // Status koneksi ke backend FastAPI
+  const [responseTime, setResponseTime] = useState("-");                 // Kecepatan respons backend (misal: "45 ms")
+
+
+  // ============================================================
+  // 2. RESET OTOMATIS SAAT MODE BERGANTI
+  // ============================================================
+  // Setiap kali user pindah mode (huruf → kata → angka), buffer dan riwayat dikosongkan
+  // agar prediksi mode sebelumnya tidak "mencemari" mode yang baru
+
   useEffect(() => {
-    activeModeRef.current = activeMode;
+    activeModeRef.current = activeMode; // Sinkronkan ref dengan state
 
-    kataBufferRef.current = [];
-    kataPredictionHistoryRef.current = [];
-    lastApiCallRef.current = 0;
+    kataBufferRef.current = [];                   // Kosongkan buffer 50 frame kata
+    kataPredictionHistoryRef.current = [];        // Kosongkan riwayat prediksi untuk smoothing
+    lastApiCallRef.current = 0;                   // Reset timer throttling
 
     setPredictionValue("-");
     setPredictionLabel(
@@ -76,32 +102,45 @@ export function useSignRecognition() {
     setLatestFeatures([]);
   }, [activeMode]);
 
-  // 3. LOADER MODEL MEDIAPIPE
+
+  // ============================================================
+  // 3. LOAD MODEL MEDIAPIPE (Hanya sekali, di-cache via ref)
+  // ============================================================
+  // Model MediaPipe diunduh dari internet (CDN) saat pertama kali dipakai.
+  // Setelah itu disimpan di ref agar tidak diunduh ulang setiap frame.
+
   const loadHandLandmarker = async () => {
-    if (handLandmarkerRef.current) return handLandmarkerRef.current;
+    if (handLandmarkerRef.current) return handLandmarkerRef.current; // Sudah ada, pakai yang lama
     setModelLoading(true);
-    const handLandmarker = await createHandLandmarker();
+    const handLandmarker = await createHandLandmarker(); // Download + inisialisasi model detektor tangan
     handLandmarkerRef.current = handLandmarker;
     setModelLoading(false);
     return handLandmarker;
   };
 
   const loadPoseLandmarker = async () => {
-    if (poseLandmarkerRef.current) return poseLandmarkerRef.current;
+    if (poseLandmarkerRef.current) return poseLandmarkerRef.current; // Sudah ada, pakai yang lama
     setModelLoading(true);
-    const poseLandmarker = await createPoseLandmarker();
+    const poseLandmarker = await createPoseLandmarker(); // Download + inisialisasi model detektor pose tubuh
     poseLandmarkerRef.current = poseLandmarker;
     setModelLoading(false);
     return poseLandmarker;
   };
 
-  // 4. PENGIRIMAN DATA API & SMOOTHING
+
+  // ============================================================
+  // 4. KIRIM DATA KE BACKEND & TAMPILKAN HASIL
+  // ============================================================
+  // Fungsi ini mengirim array angka koordinat ke FastAPI via HTTP POST.
+  // Backend akan memasukkannya ke model (RF atau GRU) dan mengembalikan prediksi.
+
   const sendFeaturesToAPI = async (
-    features: number[],
+    features: number[],  // Array angka koordinat (126 untuk huruf, 63 untuk angka, 12900 untuk kata)
     detectedHandCount: number
   ) => {
     const mode = activeModeRef.current;
 
+    // Jangan kirim jika tidak ada tangan di kamera (tidak ada data yang berarti)
     if (mode === "angka" && detectedHandCount < 1) {
       setPredictionValue("-");
       setPredictionLabel("Tampilkan tangan untuk mode angka");
@@ -123,35 +162,37 @@ export function useSignRecognition() {
       return;
     }
 
+    // Throttling: batasi request maksimal 1 kali setiap 500ms agar tidak membanjiri backend
     const now = performance.now();
     if (now - lastApiCallRef.current < API_THROTTLE_MS) {
-      return;
+      return; // Belum waktunya kirim lagi, lewati
     }
 
     let payloadFeatures = features;
 
     if (mode === "angka") {
-      payloadFeatures = features.slice(0, ANGKA_FEATURES);
+      payloadFeatures = features.slice(0, ANGKA_FEATURES); // Angka hanya butuh 63 fitur (1 tangan)
     }
 
-    if (mode === "huruf" && payloadFeatures.length !== HURUF_FEATURES) return;
-    if (mode === "angka" && payloadFeatures.length !== ANGKA_FEATURES) return;
-    if (mode === "kata" && payloadFeatures.length !== KATA_TOTAL_FEATURES)
-      return;
+    // Validasi panjang data sebelum dikirim
+    if (mode === "huruf" && payloadFeatures.length !== HURUF_FEATURES) return; // Harus 126
+    if (mode === "angka" && payloadFeatures.length !== ANGKA_FEATURES) return; // Harus 63
+    if (mode === "kata" && payloadFeatures.length !== KATA_TOTAL_FEATURES) return; // Harus 12900 (50×258)
 
-    lastApiCallRef.current = now;
+    lastApiCallRef.current = now; // Catat waktu pengiriman untuk throttling berikutnya
 
     try {
       const startTime = performance.now();
 
+      // HTTP POST ke backend FastAPI (localhost:8000/predict)
       const response = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, features: payloadFeatures }),
+        body: JSON.stringify({ mode, features: payloadFeatures }), // Kirim mode + data koordinat
       });
 
       const endTime = performance.now();
-      const result = await response.json();
+      const result = await response.json(); // Terima jawaban dari backend
 
       if (!response.ok || result.error) {
         console.error("API error:", result);
@@ -160,33 +201,38 @@ export function useSignRecognition() {
       }
 
       setApiStatus("Connected");
-      setResponseTime(`${Math.round(endTime - startTime)} ms`);
+      setResponseTime(`${Math.round(endTime - startTime)} ms`); // Tampilkan kecepatan respons
 
-      const rawConfidence = result.confidence ?? 0;
-      const rawPrediction = result.prediction ?? "-";
+      const rawConfidence = result.confidence ?? 0;  // Nilai keyakinan dari model (0.0 - 1.0)
+      const rawPrediction = result.prediction ?? "-"; // Nama kata/huruf/angka hasil prediksi
 
       if (mode === "kata") {
+        // Mode kata: ada smoothing (majority voting) agar hasil tidak loncat-loncat tiap frame
         if (rawConfidence >= KATA_CONFIDENCE_THRESHOLD) {
+          // Confidence cukup tinggi (≥ 0.75): masukkan ke riwayat untuk voting
           kataPredictionHistoryRef.current.push({
             label: rawPrediction,
             confidence: rawConfidence,
           });
+
+          // Pertahankan hanya 5 prediksi terakhir
           if (kataPredictionHistoryRef.current.length > KATA_SMOOTHING_WINDOW) {
-            kataPredictionHistoryRef.current.shift();
+            kataPredictionHistoryRef.current.shift(); // Hapus yang paling lama
           }
 
-          const stable = getStableKataPrediction(
-            kataPredictionHistoryRef.current
-          );
+          // Ambil prediksi yang paling sering muncul dari 5 prediksi terakhir (majority voting)
+          const stable = getStableKataPrediction(kataPredictionHistoryRef.current);
           setPredictionValue(stable.label);
           setPredictionLabel("kata terdeteksi");
           setConfidence(Math.round(stable.confidence * 100));
         } else {
+          // Confidence rendah: tampilkan tapi tandai "kurang yakin", tidak masuk voting
           setPredictionValue(rawPrediction);
           setPredictionLabel("kurang yakin");
           setConfidence(Math.round(rawConfidence * 100));
         }
       } else {
+        // Mode huruf/angka: langsung tampilkan hasil mentah tanpa smoothing
         setPredictionValue(rawPrediction);
         setPredictionLabel(`${mode} terdeteksi`);
         setConfidence(Math.round(rawConfidence * 100));
@@ -198,11 +244,15 @@ export function useSignRecognition() {
     }
   };
 
-  // 5. RESET BUFFER KATA
+
+  // ============================================================
+  // 5. RESET BUFFER KATA (dipanggil saat user klik tombol "Reset Kata")
+  // ============================================================
+
   const resetKataBuffer = () => {
-    kataBufferRef.current = [];
-    kataPredictionHistoryRef.current = [];
-    lastApiCallRef.current = 0;
+    kataBufferRef.current = [];            // Kosongkan 50 frame yang sudah terkumpul
+    kataPredictionHistoryRef.current = []; // Kosongkan riwayat smoothing
+    lastApiCallRef.current = 0;            // Reset timer throttling
 
     setFeatureCount(0);
     setLatestFeatures([]);
@@ -214,7 +264,13 @@ export function useSignRecognition() {
     console.log("[INFO] Buffer kata direset.");
   };
 
-  // 6. FRAME LOOP & DETEKSI LANDMARK
+
+  // ============================================================
+  // 6. LOOP DETEKSI UTAMA (berjalan setiap frame, ~30-60 kali per detik)
+  // ============================================================
+  // Ini adalah fungsi terpenting: dijalankan secara terus-menerus menggunakan requestAnimationFrame
+  // setiap frame → deteksi → ekstrak koordinat → (isi buffer / kirim ke API)
+
   const detectHands = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -225,46 +281,54 @@ export function useSignRecognition() {
     if (!video || !canvas || !handLandmarker) return;
     if (mode === "kata" && !poseLandmarker) return;
 
+    // Tunggu video siap dibaca (readyState ≥ 2 = sudah ada data)
     if (video.readyState < 2) {
       animationFrameRef.current = requestAnimationFrame(detectHands);
       return;
     }
 
+    // Samakan ukuran canvas dengan ukuran video agar overlay landmark pas
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height); // Bersihkan gambar frame sebelumnya
 
     const now = performance.now();
-    const handResults = handLandmarker.detectForVideo(video, now);
+
+    // Jalankan deteksi MediaPipe pada frame video saat ini
+    const handResults = handLandmarker.detectForVideo(video, now); // Deteksi tangan
     const poseResults =
       mode === "kata" && poseLandmarker
-        ? poseLandmarker.detectForVideo(video, now)
+        ? poseLandmarker.detectForVideo(video, now) // Deteksi pose tubuh (hanya di mode kata)
         : null;
 
     const drawingUtils = new DrawingUtils(ctx);
 
     if (handResults.landmarks && handResults.landmarks.length > 0) {
-      const totalHands = handResults.landmarks.length;
+      // Ada tangan terdeteksi di frame ini
+      const totalHands = handResults.landmarks.length; // Jumlah tangan (1 atau 2)
       const totalHandLandmarks = handResults.landmarks.reduce(
-        (total, handLandmarks) => total + handLandmarks.length,
-        0
+        (total, handLandmarks) => total + handLandmarks.length, 0
       );
 
       let features: number[] = [];
 
       if (mode === "kata") {
+        // Mode KATA: ekstrak 258 fitur (pose 132 + tangan kiri 63 + tangan kanan 63)
         features = extractKataFeatures(
-          poseResults?.landmarks?.[0],
-          handResults.landmarks,
-          handResults.handedness
+          poseResults?.landmarks?.[0], // Koordinat 33 titik pose tubuh
+          handResults.landmarks,        // Koordinat titik kedua tangan
+          handResults.handedness        // Info kiri/kanan untuk tiap tangan
         );
 
         if (features.length === KATA_NUM_FEATURES) {
+          // Masukkan 258 angka ini ke dalam buffer (antrian 50 frame)
           kataBufferRef.current.push(features);
+
+          // Buffer dibatasi 50 frame: kalau lebih, hapus yang paling lama (sliding window)
           if (kataBufferRef.current.length > KATA_MAX_FRAMES) {
             kataBufferRef.current.shift();
           }
@@ -273,9 +337,11 @@ export function useSignRecognition() {
           setFeatureCount(kataBufferRef.current.length * KATA_NUM_FEATURES);
 
           if (kataBufferRef.current.length === KATA_MAX_FRAMES) {
+            // Buffer penuh 50 frame → ratakan jadi 1 array panjang (50×258 = 12.900 angka) → kirim ke backend
             const flatFeatures = kataBufferRef.current.flat();
             sendFeaturesToAPI(flatFeatures, totalHands);
           } else {
+            // Buffer belum penuh, tampilkan progres
             setPredictionValue("-");
             setPredictionLabel(
               `Mengumpulkan frame kata ${kataBufferRef.current.length}/${KATA_MAX_FRAMES}`
@@ -284,6 +350,7 @@ export function useSignRecognition() {
           }
         }
       } else {
+        // Mode HURUF/ANGKA: ekstrak 126 fitur (2 tangan × 21 × 3) lalu langsung kirim
         features = extractHurufFeatures(
           handResults.landmarks,
           handResults.handedness
@@ -292,7 +359,7 @@ export function useSignRecognition() {
         setLatestFeatures(features);
         setFeatureCount(features.length);
 
-        sendFeaturesToAPI(features, totalHands);
+        sendFeaturesToAPI(features, totalHands); // Kirim langsung tanpa menunggu buffer
       }
 
       setHandDetected(true);
@@ -300,24 +367,25 @@ export function useSignRecognition() {
 
       const poseLandmarkCount =
         mode === "kata" && poseResults?.landmarks?.[0]
-          ? poseResults.landmarks[0].length
-          : 0;
+          ? poseResults.landmarks[0].length : 0;
 
       setLandmarkCount(totalHandLandmarks + poseLandmarkCount);
 
+      // Gambar kerangka tangan di atas video (warna putih)
       for (const handLandmarks of handResults.landmarks) {
         drawingUtils.drawConnectors(
           handLandmarks,
           HandLandmarker.HAND_CONNECTIONS,
-          { color: "#ffffff", lineWidth: 3 }
+          { color: "#ffffff", lineWidth: 3 } // Garis penghubung antar titik
         );
         drawingUtils.drawLandmarks(handLandmarks, {
           color: "#ffffff",
           lineWidth: 2,
-          radius: 4,
+          radius: 4, // Titik-titik koordinat landmark
         });
       }
 
+      // Gambar titik-titik pose tubuh di mode kata (warna kuning)
       if (mode === "kata" && poseResults?.landmarks?.[0]) {
         drawingUtils.drawLandmarks(poseResults.landmarks[0], {
           color: "#facc15",
@@ -326,12 +394,15 @@ export function useSignRecognition() {
         });
       }
     } else {
+      // Tidak ada tangan terdeteksi di frame ini
       const emptyFeatures =
         mode === "kata"
           ? Array(KATA_NUM_FEATURES).fill(0)
           : Array(HURUF_FEATURES).fill(0);
 
       if (mode === "kata") {
+        // Mode kata: jangan reset buffer total. Isi dengan frame nol agar buffer terus bergerak.
+        // Ini mencegah prediksi terhenti total saat tangan hilang sesaat.
         kataBufferRef.current.push(Array(KATA_NUM_FEATURES).fill(0));
         if (kataBufferRef.current.length > KATA_MAX_FRAMES) {
           kataBufferRef.current.shift();
@@ -345,10 +416,15 @@ export function useSignRecognition() {
       setFeatureCount(0);
     }
 
+    // Jadwalkan deteksi frame berikutnya (berjalan terus sampai kamera dimatikan)
     animationFrameRef.current = requestAnimationFrame(detectHands);
   };
 
-  // 7. KONTROL WEBCAM
+
+  // ============================================================
+  // 7. START / STOP KAMERA
+  // ============================================================
+
   const startCamera = async () => {
     try {
       setCameraError("");
@@ -359,6 +435,7 @@ export function useSignRecognition() {
         return;
       }
 
+      // Hentikan loop dan stream yang mungkin masih berjalan dari sesi sebelumnya
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
@@ -373,16 +450,18 @@ export function useSignRecognition() {
         videoRef.current.srcObject = null;
       }
 
+      // Load model MediaPipe (kalau belum dimuat)
       await loadHandLandmarker();
       await loadPoseLandmarker();
 
+      // Minta izin akses kamera dari browser
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          width: { ideal: 1280 },
+          width: { ideal: 1280 },  // Resolusi ideal 720p
           height: { ideal: 720 },
-          facingMode: "user",
+          facingMode: "user",       // Kamera depan (selfie)
         },
-        audio: false,
+        audio: false, // Tidak butuh mikrofon
       });
 
       streamRef.current = stream;
@@ -390,10 +469,10 @@ export function useSignRecognition() {
 
       setTimeout(async () => {
         if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+          videoRef.current.srcObject = stream; // Sambungkan stream ke elemen video HTML
           try {
             await videoRef.current.play();
-            detectHands();
+            detectHands(); // Mulai loop deteksi per frame
           } catch (playError) {
             console.error("Video play error:", playError);
           }
@@ -416,11 +495,13 @@ export function useSignRecognition() {
   };
 
   const stopCamera = () => {
+    // Hentikan loop animasi
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
 
+    // Hentikan semua track kamera agar kamera fisik mati (lampu indikator padam)
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -453,7 +534,13 @@ export function useSignRecognition() {
     setApiStatus("Disconnected");
   };
 
-  // 8. LIFECYCLE CLEANUP & MEMOIZATION
+
+  // ============================================================
+  // 8. CLEANUP & NILAI KEMBALIAN HOOK
+  // ============================================================
+
+  // Cleanup otomatis saat komponen dihapus dari halaman (unmount)
+  // Mencegah memory leak jika user menutup tab
   useEffect(() => {
     return () => {
       if (animationFrameRef.current) {
@@ -465,6 +552,8 @@ export function useSignRecognition() {
     };
   }, []);
 
+  // useMemo: hanya hitung ulang nilai prediction jika ada perubahan yang relevan
+  // Menghindari render ulang UI yang tidak perlu
   const prediction = useMemo(() => {
     if (!cameraActive) {
       return { value: "-", label: "Waiting for camera", confidence: 0 };
@@ -476,25 +565,26 @@ export function useSignRecognition() {
     };
   }, [cameraActive, predictionValue, predictionLabel, confidence]);
 
+  // Kembalikan semua nilai dan fungsi yang dibutuhkan komponen UI
   return {
-    videoRef,
-    canvasRef,
-    activeMode,
-    setActiveMode,
-    cameraActive,
-    cameraError,
-    modelLoading,
-    handDetected,
-    handCount,
-    landmarkCount,
-    featureCount,
-    latestFeatures,
-    confidence,
-    apiStatus,
-    responseTime,
-    prediction,
-    startCamera,
-    stopCamera,
-    resetKataBuffer,
+    videoRef,         // Untuk elemen <video>
+    canvasRef,        // Untuk elemen <canvas> overlay landmark
+    activeMode,       // Mode aktif saat ini
+    setActiveMode,    // Fungsi ganti mode
+    cameraActive,     // Status kamera
+    cameraError,      // Pesan error kamera
+    modelLoading,     // Status loading model
+    handDetected,     // Ada tangan di kamera?
+    handCount,        // Jumlah tangan
+    landmarkCount,    // Jumlah titik landmark
+    featureCount,     // Jumlah fitur yang siap dikirim
+    latestFeatures,   // Data koordinat terbaru
+    confidence,       // Kepercayaan prediksi (%)
+    apiStatus,        // Status koneksi backend
+    responseTime,     // Waktu respons backend
+    prediction,       // Hasil prediksi final { value, label, confidence }
+    startCamera,      // Fungsi nyalakan kamera
+    stopCamera,       // Fungsi matikan kamera
+    resetKataBuffer,  // Fungsi reset buffer kata
   };
 }
